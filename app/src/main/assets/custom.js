@@ -199,15 +199,21 @@ function checkTaskFailure() {
         document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
     ).singleNodeValue;
     
-    if (failSpan) {
-        log('检测到失败信息', 'warn');
-        var failBtn = document.querySelector('#app > section.el-container > main.el-main > div.businessTaskPage > button.el-button:nth-of-type(2)');
-        if (failBtn) {
-            log('点击重新获取按钮', 'error');
-            simulateClick(failBtn, function() {
-                log('已点击重新获取', 'error');
-            });
-        }
+    if (failSpan && !failSpan.dataset.clicked) {
+        log('检测到失败信息，等待重新获取按钮出现', 'warn');
+        failSpan.dataset.clicked = 'true';
+        
+        var waitForFailBtn = setInterval(function() {
+            var failBtn = document.querySelector('#app > section.el-container > main.el-main > div.businessTaskPage > button.el-button:nth-of-type(2)');
+            if (failBtn) {
+                clearInterval(waitForFailBtn);
+                log('找到重新获取按钮，点击', 'error');
+                simulateClick(failBtn, function() {
+                    log('已点击重新获取', 'error');
+                    failSpan.dataset.clicked = 'false';
+                });
+            }
+        }, 300);
     }
     
     var checkSpecialBtn = document.querySelector('#app > section.el-container > main.el-main > div.businessTaskPage > button.el-button:nth-of-type(2)');
