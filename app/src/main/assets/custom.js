@@ -1,523 +1,738 @@
-window.addEventListener("DOMContentLoaded",()=>{const t=document.createElement("script");t.src="https://www.googletagmanager.com/gtag/js?id=G-W5GKHM0893",t.async=!0,document.head.appendChild(t);const n=document.createElement("script");n.textContent="window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-W5GKHM0893');",document.body.appendChild(n)});var scheduledTime = null;
-var isTaskRunning = false;
-var taskStep1Attempts = 0;
-var failCheckCount = 0;
-var attempts = 0;
-var maxAttempts = 100;
-var loginAttempts = 0;
-var maxLoginAttempts = 1000;
-var isLoggedIn = false;
-var isTimeSet = false;
+window.addEventListener("DOMContentLoaded",()=>{const t=document.createElement("script");t.src="https://www.googletagmanager.com/gtag/js?id=G-W5GKHM0893",t.async=!0,document.head.appendChild(t);const n=document.createElement("script");n.textContent="window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-W5GKHM0893');",document.body.appendChild(n)});// 自动化抢任务脚本 - PakePlus注入版
+// 使用方式：将此文件复制到 src-tauri/data/custom.js
 
-function log(msg, type) {
-    try {
-        var d = new Date();
-        var timeStr = d.toLocaleTimeString();
-        var ms = d.getMilliseconds();
-        var output = '[AutoLogin ' + timeStr + '.' + ms + '] ' + msg;
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🔍 PakePlus自动化脚本开始加载...');
+    console.log('📍 当前页面URL:', window.location.href);
+    
+    runAutomation();
+});
+
+function runAutomation() {
+    // 配置信息
+    const CONFIG = {
+        login: {
+            username: 'To-700',
+            password: 'B96GppB75hUw',
+            targetUrl: 'https://www.qsxtiahyzx.com/'
+        },
+        step2: {
+            targetUrl: 'https://www.qsxtiahyzx.com/home',
+            buttonText: '领取今日任务'
+        },
+        step3: {
+            targetUrl: 'https://www.qsxtiahyzx.com/business_city',
+            cityName: '上海',
+            buttonText: '确认并拉取任务'
+        },
+        step4: {
+            targetUrl: 'https://www.qsxtiahyzx.com/task',
+            refreshButtonText: '重新获取任务',
+            startTaskButtonText: '开始执行任务',
+            errorText: '响应码异常',
+            checkInterval: 100
+        },
+        delays: {
+            betweenActions: 500,
+            typingMin: 150,
+            typingMax: 400
+        }
+    };
+
+    // 状态存储
+    let step123Completed = sessionStorage.getItem('automation_step123Completed') === 'true';
+    let step4Monitoring = sessionStorage.getItem('automation_step4Monitoring') === 'true';
+    
+    let step4State = {
+        refreshCount: parseInt(sessionStorage.getItem('automation_refreshCount')) || 0,
+        hasContent: false,
+        startTaskButtonFound: false,
+        mutationObserver: null,
+        lastRefreshTime: parseInt(sessionStorage.getItem('automation_lastRefreshTime')) || 0,
+        isReloading: false
+    };
+
+    const PAGE_LOAD_TIMEOUT = 5000;
+
+    // 定时抢任务配置
+    const TARGET_HOUR = 9;
+    const TARGET_MINUTE = 59;
+    const TARGET_SECOND = 59;
+
+    function getWaitTimeForTarget() {
+        const now = new Date();
+        const target = new Date();
+        target.setHours(TARGET_HOUR, TARGET_MINUTE, TARGET_SECOND, 0);
         
-        var style = 'color: #333;';
-        if (type === 'info') {
-            style = 'color: #409EFF; font-weight: bold;';
-        } else if (type === 'success') {
-            style = 'color: #67C23A; font-weight: bold;';
-        } else if (type === 'error') {
-            style = 'color: #F56C6C; font-weight: bold;';
-        } else if (type === 'warn') {
-            style = 'color: #E6A23C;';
+        if (now.getTime() >= target.getTime()) {
+            target.setDate(target.getDate() + 1);
         }
         
-        if (typeof window.console !== 'undefined' && typeof window.console.log === 'function') {
-            console.log('%c' + output, style);
+        const waitMs = target.getTime() - now.getTime();
+        return {
+            waitMs: waitMs,
+            targetTime: `${String(TARGET_HOUR).padStart(2,'0')}:${String(TARGET_MINUTE).padStart(2,'0')}:${String(TARGET_SECOND).padStart(2,'0')}`
+        };
+    }
+
+    function saveState() {
+        sessionStorage.setItem('automation_step123Completed', step123Completed);
+        sessionStorage.setItem('automation_step4Monitoring', step4Monitoring);
+        sessionStorage.setItem('automation_refreshCount', step4State.refreshCount);
+        sessionStorage.setItem('automation_lastRefreshTime', step4State.lastRefreshTime);
+    }
+
+    function clearState() {
+        sessionStorage.removeItem('automation_step123Completed');
+        sessionStorage.removeItem('automation_step4Monitoring');
+        sessionStorage.removeItem('automation_refreshCount');
+    }
+
+    function randomDelay(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function isPageFullyLoaded() {
+        return document.readyState === 'complete';
+    }
+
+    async function waitForPageLoad(maxWaitTime = 30000) {
+        console.log('⏳ 等待页面加载完成...');
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < maxWaitTime) {
+            if (isPageFullyLoaded()) {
+                await sleep(300);
+                console.log('✅ 页面加载完成');
+                return true;
+            }
+            await sleep(200);
         }
-    } catch(e) {}
-}
-
-function randomDelay(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function simulateClick(element, callback) {
-    var rect = element.getBoundingClientRect();
-    var x = rect.left + rect.width / 2 + randomDelay(-5, 5);
-    var y = rect.top + rect.height / 2 + randomDelay(-5, 5);
-    
-    if (element.scrollIntoView) {
-        element.scrollIntoView({ behavior: 'instant', block: 'center' });
+        throw new Error('等待页面加载超时');
     }
-    
-    element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: x, clientY: y }));
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
-    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
-    element.click();
-    
-    if (callback) {
-        setTimeout(callback, 50);
+
+    async function waitForUrl(targetUrl, maxWaitTime = 60000) {
+        console.log(`⏳ 等待跳转到: ${targetUrl}`);
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < maxWaitTime) {
+            if (window.location.href.includes(targetUrl.replace('https://www.qsxtiahyzx.com', ''))) {
+                console.log(`✅ 已跳转到目标页面: ${targetUrl}`);
+                await sleep(500);
+                return true;
+            }
+            await sleep(300);
+        }
+        throw new Error(`等待跳转到 ${targetUrl} 超时`);
     }
-}
 
-function triggerInputEvent(element) {
-    var events = ['input', 'change', 'blur'];
-    events.forEach(function(eventType) {
-        var event = new Event(eventType, { bubbles: true });
-        element.dispatchEvent(event);
-    });
-}
-
-function executeTask() {
-    if (isTaskRunning) {
-        return;
-    }
-    isTaskRunning = true;
-    failCheckCount = 0;
-    
-    log('开始执行任务', 'info');
-    taskStep1Attempts = 0;
-    executeTaskStep1();
-}
-
-function executeTaskStep1() {
-    taskStep1Attempts++;
-    log('尝试查找领取任务按钮, attempt: ' + taskStep1Attempts, 'warn');
-    
-    var taskBtn = null;
-    
-    var taskBtnSpan = document.evaluate(
-        '//span[contains(text(),"领取今日任务")]',
-        document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
-    ).singleNodeValue;
-    taskBtn = taskBtnSpan ? taskBtnSpan.parentElement : null;
-    
-    if (taskBtn) {
-        log('找到领取今日任务按钮', 'success');
-        simulateClick(taskBtn, function() {
-            log('已点击领取今日任务按钮', 'success');
-            isTaskRunning = false;
+    async function simulateHumanInput(element, text) {
+        element.focus();
+        
+        const rect = element.getBoundingClientRect();
+        const mouseX = rect.left + Math.random() * rect.width;
+        const mouseY = rect.top + Math.random() * rect.height;
+        
+        for (let i = 0; i < 5; i++) {
+            const moveX = mouseX + (Math.random() - 0.5) * 20;
+            const moveY = mouseY + (Math.random() - 0.5) * 10;
+            element.dispatchEvent(new MouseEvent('mousemove', {
+                clientX: moveX,
+                clientY: moveY,
+                bubbles: true
+            }));
+            await sleep(randomDelay(20, 50));
+        }
+        
+        element.dispatchEvent(new MouseEvent('mousedown', {
+            clientX: mouseX,
+            clientY: mouseY,
+            bubbles: true,
+            button: 0
+        }));
+        await sleep(randomDelay(30, 80));
+        
+        element.click();
+        element.value = '';
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            element.value += char;
             
-            if (!isTimeSet) {
-                isTimeSet = true;
-                var defaultTime = '09:59:58';
-                createCustomPrompt(defaultTime, function(userTime) {
-                    scheduledTime = userTime;
-                    log('已设置运行时间: ' + scheduledTime, 'info');
-                    waitForScheduledTimeTask();
-                }, function() {
-                    checkConfirmAndExecute();
-                });
-            } else {
-                checkConfirmAndExecute();
-            }
-        });
-    } else {
-        setTimeout(executeTaskStep1, 300);
+            element.dispatchEvent(new InputEvent('input', {
+                data: char,
+                inputType: 'insertText',
+                bubbles: true
+            }));
+            
+            element.dispatchEvent(new KeyboardEvent('keyup', {
+                key: char,
+                bubbles: true
+            }));
+            
+            await sleep(randomDelay(CONFIG.delays.typingMin, CONFIG.delays.typingMax));
+        }
+        
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(randomDelay(100, 300));
+        element.blur();
     }
-}
 
-function checkConfirmAndExecute() {
-    var confirmBtnSpan = document.evaluate(
-        '//span[contains(text(),"确认并拉取任务")]',
-        document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
-    ).singleNodeValue;
-    var confirmBtn = confirmBtnSpan ? confirmBtnSpan.parentElement : null;
-    
-    if (confirmBtn) {
-        log('找到确认按钮', 'success');
-        simulateClick(confirmBtn, function() {
-            log('已点击确认按钮，等待检查失败信息', 'success');
-            setTimeout(checkTaskFailure, 300);
-        });
-    } else {
-        log('未找到确认按钮，300ms后重试', 'warn');
-        setTimeout(checkConfirmAndExecute, 300);
+    async function simulateHumanClick(element) {
+        if (!element) throw new Error('点击元素不存在');
+        
+        const rect = element.getBoundingClientRect();
+        const clickX = rect.left + rect.width / 2 + (Math.random() - 0.5) * rect.width * 0.3;
+        const clickY = rect.top + rect.height / 2 + (Math.random() - 0.5) * rect.height * 0.3;
+        
+        element.dispatchEvent(new MouseEvent('mousemove', {
+            clientX: clickX,
+            clientY: clickY,
+            bubbles: true
+        }));
+        await sleep(randomDelay(50, 150));
+        
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await sleep(randomDelay(100, 200));
+        
+        element.dispatchEvent(new MouseEvent('mouseenter', {
+            clientX: clickX,
+            clientY: clickY,
+            bubbles: true
+        }));
+        
+        element.dispatchEvent(new MouseEvent('mouseover', {
+            clientX: clickX,
+            clientY: clickY,
+            bubbles: true
+        }));
+        
+        element.dispatchEvent(new MouseEvent('mousedown', {
+            clientX: clickX,
+            clientY: clickY,
+            bubbles: true,
+            button: 0
+        }));
+        
+        await sleep(randomDelay(50, 100));
+        
+        element.click();
+        
+        element.dispatchEvent(new MouseEvent('mouseup', {
+            clientX: clickX,
+            clientY: clickY,
+            bubbles: true,
+            button: 0
+        }));
+        
+        await sleep(100);
     }
-}
 
-function checkTaskFailure() {
-    failCheckCount++;
-    
-    var errorSpan = document.evaluate(
-        '//span[contains(text(),"响应码异常:3,参数异常")]',
-        document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
-    ).singleNodeValue;
-    
-    if (!errorSpan) {
-        var allSpans = document.querySelectorAll('span');
-        for (var k = 0; k < allSpans.length; k++) {
-            if (allSpans[k].textContent.indexOf('响应码异常') !== -1) {
-                errorSpan = allSpans[k];
-                break;
-            }
+    function fastClick(element) {
+        if (!element) return false;
+        try {
+            element.click();
+            return true;
+        } catch (error) {
+            console.error('点击失败:', error.message);
+            return false;
         }
     }
-    
-    if (errorSpan) {
-        log('检测到参数异常错误，点击取消任务按钮', 'error');
+
+    async function step1_login() {
+        console.log('🚀 ========== 开始执行步骤一：登录自动化 ==========');
         
-        var cancelBtnSpan = document.evaluate(
-            '//span[contains(text(),"取消任务｜返回首页")]',
-            document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
-        ).singleNodeValue;
-        
-        if (cancelBtnSpan) {
-            var cancelBtn = cancelBtnSpan.parentElement;
-            if (cancelBtn && cancelBtn.tagName === 'BUTTON') {
-                simulateClick(cancelBtn, function() {
-                    log('已点击取消任务按钮，等待确认按钮出现', 'warn');
-                    
-                    var checkConfirmBtn = setInterval(function() {
-                        var confirmBtn = document.querySelector('button.el-button.el-button--default.el-button--small.el-button--primary');
-                        if (confirmBtn) {
-                            clearInterval(checkConfirmBtn);
-                            log('找到确认按钮，点击', 'success');
-                            simulateClick(confirmBtn, function() {
-                                log('已点击确认按钮，重新执行任务', 'success');
-                                failCheckCount = 0;
-                                executeTaskStep1();
-                            });
-                        }
-                    }, 500);
-                });
+        try {
+            if (!window.location.href.includes('qsxtiahyzx.com')) {
+                console.warn('⚠️ 当前不在目标网站，导航到登录页面...');
+                window.location.href = CONFIG.login.targetUrl;
                 return;
             }
+            
+            await waitForPageLoad();
+            
+            if (window.location.href.includes('/home')) {
+                console.log('✅ 检测到已登录，跳过步骤一');
+                return;
+            }
+            
+            console.log('🔍 查找用户名输入框...');
+            const usernameInput = document.querySelector('input[type="text"][placeholder*="用户名称"]') ||
+                                  document.querySelector('input[placeholder*="用户名称"]') ||
+                                  document.querySelector('input[type="text"]');
+            
+            if (!usernameInput) throw new Error('未找到用户名输入框');
+            console.log('✅ 找到用户名输入框');
+            
+            console.log('🔍 查找密码输入框...');
+            const passwordInput = document.querySelector('input[type="password"]') ||
+                                  document.querySelector('input[placeholder*="密码"]');
+            
+            if (!passwordInput) throw new Error('未找到密码输入框');
+            console.log('✅ 找到密码输入框');
+            
+            console.log('🔍 查找登录按钮...');
+            const loginButton = Array.from(document.querySelectorAll('span')).find(span => 
+                span.textContent.trim() === '登录'
+            ) || document.querySelector('button') ||
+               document.querySelector('.el-button--primary');
+            
+            if (!loginButton) throw new Error('未找到登录按钮');
+            console.log('✅ 找到登录按钮');
+            
+            console.log('📝 正在输入用户名...');
+            await simulateHumanInput(usernameInput, CONFIG.login.username);
+            await sleep(CONFIG.delays.betweenActions);
+            
+            console.log('📝 正在输入密码...');
+            await simulateHumanInput(passwordInput, CONFIG.login.password);
+            await sleep(CONFIG.delays.betweenActions);
+            
+            console.log('🖱️ 正在点击登录按钮...');
+            await simulateHumanClick(loginButton);
+            
+            console.log('✅ 步骤一完成：登录流程执行完成！');
+            
+        } catch (error) {
+            console.error('❌ 步骤一出错:', error.message);
+            throw error;
         }
+    }
+
+    async function step2_claimTask() {
+        console.log('🚀 ========== 开始执行步骤二：领取今日任务 ==========');
         
-        location.reload();
-        return;
-    }
-    
-    var failSpan = document.evaluate(
-        '//span[text()="获取任务失败 ｜ 等待重新获取任务"]',
-        document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
-    ).singleNodeValue;
-    
-    if (failSpan) {
-        log('检测到失败信息', 'warn');
-        var failBtn = document.querySelector('#app > section.el-container > main.el-main > div.businessTaskPage > button.el-button:nth-of-type(2)');
-        if (failBtn) {
-            log('点击重新获取按钮', 'error');
-            simulateClick(failBtn, function() {
-                log('已点击重新获取', 'error');
+        try {
+            await waitForUrl(CONFIG.step2.targetUrl);
+            await waitForPageLoad();
+            
+            console.log('🔍 查找领取任务按钮...');
+            const claimButton = Array.from(document.querySelectorAll('span')).find(span => {
+                return span.textContent.trim().includes(CONFIG.step2.buttonText);
             });
+            
+            if (!claimButton) throw new Error(`未找到"${CONFIG.step2.buttonText}"按钮`);
+            console.log(`✅ 找到"${CONFIG.step2.buttonText}"按钮`);
+            
+            claimButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            await sleep(200);
+            
+            console.log(`🖱️ 正在点击"${CONFIG.step2.buttonText}"按钮...`);
+            await simulateHumanClick(claimButton);
+            
+            console.log('✅ 步骤二完成！');
+            
+        } catch (error) {
+            console.error('❌ 步骤二出错:', error.message);
+            throw error;
         }
     }
-    
-    var checkSpecialBtn = document.querySelector('#app > section.el-container > main.el-main > div.businessTaskPage > button.el-button:nth-of-type(2)');
-    if (checkSpecialBtn) {
-        log('检测到特殊按钮，点击详情元素', 'info');
-        var detailSpan = document.querySelector('#app > section.el-container > main.el-main > div.businessTaskPage > div.el-descriptions > div.el-descriptions__body:nth-of-type(2) > table.el-descriptions__table > tbody:nth-of-type(7) > tr.el-descriptions-row > td.el-descriptions-item__cell > span');
-        if (detailSpan) {
-            simulateClick(detailSpan, function() {
-                log('已点击详情元素，脚本停止运行', 'success');
-            });
-            isTaskRunning = false;
+
+    async function step3_selectCity() {
+        console.log('🚀 ========== 开始执行步骤三：选择城市并拉取任务 ==========');
+        
+        try {
+            await waitForUrl(CONFIG.step3.targetUrl);
+            await waitForPageLoad();
+            
+            console.log('🔍 查找省份输入框...');
+            let provinceInput = document.querySelector('input[placeholder="请选择省份"]') ||
+                               Array.from(document.querySelectorAll('input[readonly]')).find(input => 
+                                   input.getAttribute('placeholder') === '请选择省份'
+                               );
+            
+            if (!provinceInput) {
+                const inputs = document.querySelectorAll('input[placeholder]');
+                for (let input of inputs) {
+                    if (input.placeholder.includes('省份')) {
+                        provinceInput = input;
+                        break;
+                    }
+                }
+            }
+            
+            if (!provinceInput) throw new Error('未找到省份输入框');
+            console.log('✅ 找到省份输入框');
+            
+            console.log('🖱️ 正在点击省份输入框...');
+            await simulateHumanClick(provinceInput);
+            await sleep(500);
+            
+            console.log('🔍 等待"上海"选项出现...');
+            let provinceOption = null;
+            
+            for (let i = 0; i < 20; i++) {
+                const options = document.querySelectorAll('.el-select-dropdown__item span, .el-select-dropdown span, .el-dropdown-menu span, span');
+                for (let option of options) {
+                    const text = option.textContent.trim();
+                    if (text === '上海') {
+                        provinceOption = option;
+                        break;
+                    }
+                }
+                if (provinceOption) break;
+                await sleep(200);
+            }
+            
+            if (!provinceOption) throw new Error('未找到省份选项: 上海');
+            console.log(`✅ 找到省份选项: ${provinceOption.textContent.trim()}`);
+            
+            console.log('🖱️ 正在点击"上海"...');
+            await simulateHumanClick(provinceOption);
+            await sleep(500);
+            
+            console.log('🔍 查找城市输入框...');
+            let cityInput = document.querySelector('input[placeholder="请选择城市"]') ||
+                           Array.from(document.querySelectorAll('input[readonly]')).find(input => 
+                               input.getAttribute('placeholder') === '请选择城市'
+                           );
+            
+            if (!cityInput) {
+                const inputs = document.querySelectorAll('input[placeholder]');
+                for (let input of inputs) {
+                    if (input.placeholder.includes('城市')) {
+                        cityInput = input;
+                        break;
+                    }
+                }
+            }
+            
+            if (!cityInput) throw new Error('未找到城市输入框');
+            console.log('✅ 找到城市输入框');
+            
+            console.log('🖱️ 正在点击城市输入框...');
+            await simulateHumanClick(cityInput);
+            await sleep(500);
+            
+            console.log('🔍 等待"上海市"选项出现...');
+            let cityOption = null;
+            
+            for (let i = 0; i < 20; i++) {
+                const options = document.querySelectorAll('.el-select-dropdown__item span, .el-select-dropdown span, .el-dropdown-menu span, span');
+                for (let option of options) {
+                    const text = option.textContent.trim();
+                    if (text === '上海市') {
+                        cityOption = option;
+                        break;
+                    }
+                }
+                if (cityOption) break;
+                await sleep(200);
+            }
+            
+            if (!cityOption) throw new Error('未找到城市选项: 上海市');
+            console.log(`✅ 找到城市选项: ${cityOption.textContent.trim()}`);
+            
+            console.log('🖱️ 正在点击"上海市"...');
+            await simulateHumanClick(cityOption);
+            await sleep(1000);
+            
+            // 等待定时到达
+            const waitInfo = getWaitTimeForTarget();
+            console.log(`⏰ 当前时间: ${new Date().toLocaleTimeString()}`);
+            console.log(`⏰ 目标时间: ${waitInfo.targetTime}`);
+            console.log(`⏰ 等待毫秒: ${waitInfo.waitMs}`);
+            
+            if (waitInfo.waitMs > 0) {
+                console.log(`⏰ 等待定时抢任务: ${waitInfo.targetTime}`);
+                console.log(`⏳ 还需等待: ${Math.floor(waitInfo.waitMs / 1000)} 秒`);
+                
+                const startWaitTime = Date.now();
+                while (Date.now() - startWaitTime < waitInfo.waitMs) {
+                    const remaining = Math.floor((waitInfo.waitMs - (Date.now() - startWaitTime)) / 1000);
+                    if (remaining > 0 && remaining % 10 === 0 && remaining < waitInfo.waitMs / 1000) {
+                        console.log(`⏳ 还剩 ${remaining} 秒...`);
+                    }
+                    await sleep(1000);
+                }
+                
+                console.log('⏰ 时间到达，点击确认并拉取任务按钮！');
+            } else {
+                console.log('⏰ 时间已过，立即点击确认并拉取任务按钮！');
+            }
+            
+            console.log(`🔍 查找"${CONFIG.step3.buttonText}"按钮...`);
+            let pullTaskButton = null;
+            
+            const buttons = document.querySelectorAll('span, button, div[role="button"], a');
+            for (let btn of buttons) {
+                const text = btn.textContent.trim();
+                if (text.includes('确认') && text.includes('拉取')) {
+                    pullTaskButton = btn;
+                    break;
+                }
+            }
+            
+            if (!pullTaskButton) {
+                pullTaskButton = document.querySelector('.el-button--primary');
+            }
+            
+            if (!pullTaskButton) throw new Error(`未找到"${CONFIG.step3.buttonText}"按钮`);
+            console.log(`✅ 找到"${CONFIG.step3.buttonText}"按钮`);
+            
+            console.log(`🖱️ 正在点击确认并拉取任务按钮...`);
+            await simulateHumanClick(pullTaskButton);
+            
+            console.log('✅ 步骤三完成！');
+            
+        } catch (error) {
+            console.error('❌ 步骤三出错:', error.message);
+            throw error;
+        }
+    }
+
+    function isBlankPage() {
+        if (!document.body) return true;
+        const bodyText = document.body.textContent || '';
+        if (bodyText.trim().length === 0) return true;
+        
+        const visibleElements = document.body.querySelectorAll('*');
+        for (let element of visibleElements) {
+            const tagName = element.tagName.toLowerCase();
+            if (['script', 'style', 'noscript', 'meta', 'link'].includes(tagName)) continue;
+            
+            const style = window.getComputedStyle(element);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+            
+            const text = element.textContent || '';
+            if (text.trim().length > 0) return false;
+        }
+        return true;
+    }
+
+    function hasErrorText() {
+        const bodyText = document.body.textContent || '';
+        return bodyText.includes(CONFIG.step4.errorText);
+    }
+
+    function findRefreshButton() {
+        const buttons = document.querySelectorAll('span, button, div[role="button"], a');
+        for (let btn of buttons) {
+            if (btn.textContent.trim().includes(CONFIG.step4.refreshButtonText)) {
+                return btn;
+            }
+        }
+        return null;
+    }
+
+    function findStartTaskButton() {
+        const buttons = document.querySelectorAll('span, button, div[role="button"], a');
+        for (let btn of buttons) {
+            if (btn.textContent.trim().includes(CONFIG.step4.startTaskButtonText)) {
+                return btn;
+            }
+        }
+        return null;
+    }
+
+    function forceRefresh() {
+        step4State.refreshCount++;
+        step4State.lastRefreshTime = Date.now();
+        step4State.hasContent = false;
+        step4State.isReloading = true;
+        console.log(`🔄 正在刷新页面... (第 ${step4State.refreshCount} 次)`);
+        saveState();
+        
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.set('_t', Date.now());
+        window.location.href = currentUrl.toString();
+    }
+
+    function checkPageLoadTimeout() {
+        if (!step4State.isReloading) return false;
+        
+        const timeSinceRefresh = Date.now() - step4State.lastRefreshTime;
+        if (timeSinceRefresh > PAGE_LOAD_TIMEOUT) {
+            console.warn(`⚠️ 页面加载超时 (${Math.round(timeSinceRefresh/1000)}秒)，准备再次刷新...`);
+            return true;
+        }
+        return false;
+    }
+
+    function setupMutationObserver() {
+        if (step4State.mutationObserver) return;
+
+        step4State.mutationObserver = new MutationObserver(() => {
+            if (step4Monitoring && step4State.hasContent && !step4State.startTaskButtonFound) {
+                const startTaskButton = findStartTaskButton();
+                if (startTaskButton) {
+                    console.log('🎉 检测到"开始执行任务"按钮！');
+                    step4State.startTaskButtonFound = true;
+                    step4Monitoring = false;
+                    clearState();
+                    return;
+                }
+
+                const refreshButton = findRefreshButton();
+                if (refreshButton) {
+                    console.log('⚡ 检测到"重新获取任务"按钮，立即点击！');
+                    fastClick(refreshButton);
+                }
+            }
+        });
+
+        step4State.mutationObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            characterData: true
+        });
+
+        console.log('✅ DOM监听器已设置');
+    }
+
+    async function checkPageStatus() {
+        if (checkPageLoadTimeout()) {
+            forceRefresh();
             return;
         }
-    }
-    
-    var finishSpan = document.querySelector('#app > section > main > div > button:nth-child(4) > span');
-    if (finishSpan) {
-        log('检测到任务完成按钮，脚本停止运行', 'success');
-        isTaskRunning = false;
-        return;
-    }
-    
-    setTimeout(checkTaskFailure, 200);
-}
 
-function checkLogoutAndPrompt() {
-    loginAttempts++;
-    
-    var logoutSpan = document.evaluate(
-        '//span[text()="退出"]',
-        document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
-    ).singleNodeValue;
-    
-    log('检查退出按钮, attempt: ' + loginAttempts + ', found: ' + (logoutSpan !== null), 'warn');
-    
-    if (logoutSpan) {
-        log('找到退出按钮，开始执行任务', 'success');
-        executeTask();
-    } else if (loginAttempts < maxLoginAttempts) {
-        setTimeout(checkLogoutAndPrompt, 500);
-    }
-}
+        if (hasErrorText()) {
+            console.warn('⚠️ 检测到错误文本，准备刷新');
+            forceRefresh();
+            return;
+        }
 
-function autoLogin() {
-    if (isLoggedIn) {
-        return;
-    }
-    
-    attempts++;
-    
-    var inputs = document.querySelectorAll('input');
-    var usernameInput = null;
-    var passwordInput = null;
-    
-    for (var i = 0; i < inputs.length; i++) {
-        var input = inputs[i];
-        if (input.type === 'text' && input.placeholder === '输入用户名称') {
-            usernameInput = input;
+        if (isBlankPage()) {
+            console.warn('⚠️ 检测到空白页，准备刷新');
+            forceRefresh();
+            return;
         }
-        if (input.type === 'password' && input.placeholder === '请输入密码') {
-            passwordInput = input;
+
+        if (step4State.isReloading && !isBlankPage()) {
+            console.log('✅ 页面加载完成');
+            step4State.isReloading = false;
+            step4State.lastRefreshTime = 0;
+        }
+
+        step4State.hasContent = true;
+        
+        const startTaskButton = findStartTaskButton();
+        if (startTaskButton) {
+            console.log('🎉 找到"开始执行任务"按钮！任务抢到了！');
+            step4State.startTaskButtonFound = true;
+            step4Monitoring = false;
+            clearState();
+            alert('🎉 任务抢到了！请开始执行任务！');
+            return;
+        }
+        
+        const refreshButton = findRefreshButton();
+        if (refreshButton) {
+            console.log('⚡ 点击"重新获取任务"按钮');
+            fastClick(refreshButton);
         }
     }
-    
-    var buttons = document.querySelectorAll('button');
-    var loginButton = null;
-    
-    for (var j = 0; j < buttons.length; j++) {
-        var btn = buttons[j];
-        if (btn.textContent === '登录' && btn.type === 'button') {
-            loginButton = btn;
-            break;
-        }
-    }
-    
-    if (usernameInput && passwordInput && loginButton) {
-        log('找到登录表单，开始自动登录', 'info');
-        simulateClick(usernameInput, function() {
-            usernameInput.focus();
-            setTimeout(function() {
-                var username = 'To-700';
-                var charIndex = 0;
+
+    async function step4_monitorTask() {
+        console.log('🚀 ========== 开始执行步骤四：循环监控抢任务 ==========');
+        
+        try {
+            if (!window.location.href.includes('/task')) {
+                console.log('⏳ 等待跳转到任务页面...');
+                await waitForUrl(CONFIG.step4.targetUrl);
+            }
+            
+            await waitForPageLoad();
+            
+            if (!step4Monitoring) {
+                step4Monitoring = true;
+                step4State.hasContent = false;
+                step4State.startTaskButtonFound = false;
+            }
+            
+            setupMutationObserver();
+            
+            await checkPageStatus();
+            
+            console.log('🔄 开始循环监控...');
+            while (step4Monitoring && !step4State.startTaskButtonFound) {
+                await sleep(CONFIG.step4.checkInterval);
                 
-                function typeUsername() {
-                    if (charIndex < username.length) {
-                        usernameInput.value = username.substring(0, charIndex + 1);
-                        triggerInputEvent(usernameInput);
-                        charIndex++;
-                        setTimeout(typeUsername, randomDelay(50, 150));
-                    } else {
-                        log('用户名输入完成', 'success');
-                        setTimeout(function() {
-                            simulateClick(passwordInput, function() {
-                                passwordInput.focus();
-                                setTimeout(function() {
-                                    var password = 'B96GppB75hUw';
-                                    var pwdIndex = 0;
-                                    
-                                    function typePassword() {
-                                        if (pwdIndex < password.length) {
-                                            passwordInput.value = password.substring(0, pwdIndex + 1);
-                                            triggerInputEvent(passwordInput);
-                                            pwdIndex++;
-                                            setTimeout(typePassword, randomDelay(50, 150));
-                                        } else {
-                                            log('密码输入完成', 'success');
-                                            setTimeout(function() {
-                                                log('已点击登录按钮', 'success');
-                                                simulateClick(loginButton, function() {
-                                                    isLoggedIn = true;
-                                                    setTimeout(checkLogoutAndPrompt, 1000);
-                                                });
-                                            }, randomDelay(2000, 4000));
-                                        }
-                                    }
-                                    
-                                    typePassword();
-                                }, randomDelay(1000, 2000));
-                            });
-                        }, randomDelay(1000, 2000));
+                if (!isPageFullyLoaded()) continue;
+                
+                if (step4State.hasContent) {
+                    await checkPageStatus();
+                } else {
+                    if (!isBlankPage() && !hasErrorText()) {
+                        step4State.hasContent = true;
+                        await checkPageStatus();
                     }
                 }
                 
-                typeUsername();
-            }, randomDelay(1000, 2000));
-        });
-    } else {
-        log('未找到登录表单', 'error');
+                saveState();
+            }
+            
+            if (step4State.startTaskButtonFound) {
+                console.log('🎉 自动化流程完成：抢到任务！');
+            }
+            
+        } catch (error) {
+            console.error('❌ 步骤四出错:', error.message);
+            console.log('🔄 出错后刷新页面继续...');
+            forceRefresh();
+        }
     }
-}
 
-function createCustomPrompt(defaultTime, callback, runNowCallback) {
-    log('创建自定义弹窗', 'info');
-    
-    var overlay = document.createElement('div');
-    overlay.id = 'auto-login-overlay';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:flex;justify-content:center;align-items:center;';
-    
-    var box = document.createElement('div');
-    box.style.cssText = 'background:#fff;padding:30px;border-radius:10px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);';
-    
-    var title = document.createElement('div');
-    title.style.cssText = 'font-size:18px;font-weight:bold;margin-bottom:20px;color:#333;';
-    title.textContent = '设置脚本运行时间';
-    
-    var timeContainer = document.createElement('div');
-    timeContainer.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:5px;margin-bottom:20px;';
-    
-    var hourInput = document.createElement('input');
-    hourInput.type = 'text';
-    hourInput.maxLength = 2;
-    hourInput.placeholder = '09';
-    hourInput.style.cssText = 'width:40px;padding:10px;font-size:16px;text-align:center;border:1px solid #ddd;border-radius:5px;';
-    
-    var colon1 = document.createElement('span');
-    colon1.textContent = ':';
-    colon1.style.cssText = 'font-size:18px;font-weight:bold;';
-    
-    var minuteInput = document.createElement('input');
-    minuteInput.type = 'text';
-    minuteInput.maxLength = 2;
-    minuteInput.placeholder = '59';
-    minuteInput.style.cssText = 'width:40px;padding:10px;font-size:16px;text-align:center;border:1px solid #ddd;border-radius:5px;';
-    
-    var colon2 = document.createElement('span');
-    colon2.textContent = ':';
-    colon2.style.cssText = 'font-size:18px;font-weight:bold;';
-    
-    var secondInput = document.createElement('input');
-    secondInput.type = 'text';
-    secondInput.maxLength = 2;
-    secondInput.placeholder = '58';
-    secondInput.style.cssText = 'width:40px;padding:10px;font-size:16px;text-align:center;border:1px solid #ddd;border-radius:5px;';
-    
-    hourInput.addEventListener('keydown', function(e) {
-        if (!((e.key >= '0' && e.key <= '9') || e.key === 'Backspace' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Tab')) {
-            e.preventDefault();
-        }
-    });
-    
-    minuteInput.addEventListener('keydown', function(e) {
-        if (!((e.key >= '0' && e.key <= '9') || e.key === 'Backspace' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Tab')) {
-            e.preventDefault();
-        }
-    });
-    
-    secondInput.addEventListener('keydown', function(e) {
-        if (!((e.key >= '0' && e.key <= '9') || e.key === 'Backspace' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Tab')) {
-            e.preventDefault();
-        }
-    });
-    
-    hourInput.addEventListener('input', function() {
-        var val = this.value.replace(/\D/g, '');
-        if (val.length > 2) val = val.substring(0, 2);
-        var num = parseInt(val);
-        if (num > 23) val = '23';
-        this.value = val;
-        if (this.value.length === 2) {
-            minuteInput.focus();
-        }
-    });
-    
-    minuteInput.addEventListener('input', function() {
-        var val = this.value.replace(/\D/g, '');
-        if (val.length > 2) val = val.substring(0, 2);
-        var num = parseInt(val);
-        if (num > 59) val = '59';
-        this.value = val;
-        if (this.value.length === 2) {
-            secondInput.focus();
-        }
-    });
-    
-    secondInput.addEventListener('input', function() {
-        var val = this.value.replace(/\D/g, '');
-        if (val.length > 2) val = val.substring(0, 2);
-        var num = parseInt(val);
-        if (num > 59) val = '59';
-        this.value = val;
-    });
-    
-    timeContainer.appendChild(hourInput);
-    timeContainer.appendChild(colon1);
-    timeContainer.appendChild(minuteInput);
-    timeContainer.appendChild(colon2);
-    timeContainer.appendChild(secondInput);
-    
-    var btnContainer = document.createElement('div');
-    btnContainer.style.cssText = 'display:flex;gap:10px;';
-    
-    var btnRunNow = document.createElement('button');
-    btnRunNow.textContent = '立即运行';
-    btnRunNow.style.cssText = 'flex:1;padding:12px;font-size:16px;background:#67C23A;color:#fff;border:none;border-radius:5px;cursor:pointer;';
-    
-    var btnConfirm = document.createElement('button');
-    btnConfirm.textContent = '确定';
-    btnConfirm.style.cssText = 'flex:1;padding:12px;font-size:16px;background:#409EFF;color:#fff;border:none;border-radius:5px;cursor:pointer;';
-    
-    btnRunNow.onclick = function() {
-        overlay.remove();
-        if (runNowCallback) {
-            runNowCallback();
-        }
-    };
-    
-    btnConfirm.onclick = function() {
-        var hour = hourInput.value || '09';
-        var minute = minuteInput.value || '59';
-        var second = secondInput.value || '58';
+    async function executeSteps1to3() {
+        console.log('🚀 ========== 执行步骤1-3（只执行一次） ==========');
         
-        if (hour.length === 1) hour = '0' + hour;
-        if (minute.length === 1) minute = '0' + minute;
-        if (second.length === 1) second = '0' + second;
-        
-        var time = hour + ':' + minute + ':' + second;
-        
-        overlay.remove();
-        if (callback) {
-            callback(time);
+        try {
+            await step1_login();
+            await sleep(2000);
+            await step2_claimTask();
+            await sleep(2000);
+            await step3_selectCity();
+            
+            step123Completed = true;
+            saveState();
+            
+            console.log('✅ 步骤1-3全部完成！');
+            
+        } catch (error) {
+            console.error('❌ 步骤1-3执行出错:', error.message);
+            throw error;
         }
-    };
-    
-    btnContainer.appendChild(btnRunNow);
-    btnContainer.appendChild(btnConfirm);
-    
-    box.appendChild(title);
-    box.appendChild(timeContainer);
-    box.appendChild(btnContainer);
-    overlay.appendChild(box);
-    document.body.appendChild(overlay);
-    
-    log('自定义弹窗已创建', 'success');
-}
-
-function waitForScheduledTime() {
-    if (!scheduledTime) {
-        log('未设置运行时间', 'error');
-        return;
     }
-    
-    var now = new Date();
-    var currentTime = now.toTimeString().substring(0, 8);
-    
-    log('当前时间: ' + currentTime + ', 目标时间: ' + scheduledTime, 'warn');
-    
-    if (currentTime >= scheduledTime) {
-        log('到达目标时间，开始执行任务', 'success');
-        executeTask();
-    } else {
-        setTimeout(waitForScheduledTime, 1000);
-    }
-}
 
-function waitForScheduledTimeTask() {
-    if (!scheduledTime) {
-        log('未设置运行时间', 'error');
-        return;
+    async function mainController() {
+        console.log('🚀 PakePlus主控制器启动');
+        console.log('🔧 步骤1-3已完成:', step123Completed);
+        console.log('🔧 步骤四监控中:', step4Monitoring);
+        
+        try {
+            const currentUrl = window.location.href;
+            
+            if (currentUrl.includes('/task') && step123Completed) {
+                console.log('📍 检测到在任务页面且步骤1-3已完成，直接执行步骤四');
+                await step4_monitorTask();
+                return;
+            }
+            
+            if (!step123Completed) {
+                await executeSteps1to3();
+            }
+            
+            await step4_monitorTask();
+            
+        } catch (error) {
+            console.error('❌ 主控制器出错:', error.message);
+            
+            if (step4Monitoring) {
+                console.log('🔄 步骤四出错，刷新页面继续...');
+                setTimeout(() => {
+                    forceRefresh();
+                }, 2000);
+            }
+        }
     }
-    
-    var now = new Date();
-    var currentTime = now.toTimeString().substring(0, 8);
-    var currentMs = now.getMilliseconds();
-    
-    log('等待时间: 当前=' + currentTime + '.' + currentMs + ', 目标=' + scheduledTime, 'warn');
-    
-    if (currentTime >= scheduledTime) {
-        log('到达目标时间，执行确认并拉取任务', 'success');
-        checkConfirmAndExecute();
-    } else {
-        log('时间未到，继续等待...', 'warn');
-        setTimeout(waitForScheduledTimeTask, 1000);
-    }
-}
 
-log('脚本启动', 'info');
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', autoLogin);
-} else {
-    autoLogin();
+    console.log('✅ PakePlus脚本初始化完成，准备执行自动化...');
+    mainController();
 }
